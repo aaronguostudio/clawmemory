@@ -4,13 +4,19 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Image from "next/image";
-import { FileText, Pencil, Save, X, RefreshCw, Search, Database } from "lucide-react";
+import { FileText, Pencil, Save, X, RefreshCw, Search, Database, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 interface MemoryFile {
@@ -35,7 +41,42 @@ interface IndexStatus {
   raw: string;
 }
 
+interface Tag {
+  tag: string;
+  count: number;
+  files: string[];
+}
+
 type Filter = "all" | "daily";
+
+const TEMPLATES = [
+  {
+    name: "Daily Note",
+    icon: "📅",
+    generate: () => {
+      const d = new Date().toISOString().slice(0, 10);
+      return { path: `memory/${d}.md`, content: `# ${d}\n\n- ` };
+    },
+  },
+  {
+    name: "Project Note",
+    icon: "📁",
+    prompt: "Project name:",
+    generate: (name: string) => ({
+      path: `memory/${name.toLowerCase().replace(/\s+/g, "-")}.md`,
+      content: `# Project: ${name}\n\n## Status\n\n## Decisions\n\n## Next Steps\n`,
+    }),
+  },
+  {
+    name: "Person Note",
+    icon: "👤",
+    prompt: "Person name:",
+    generate: (name: string) => ({
+      path: `memory/${name.toLowerCase().replace(/\s+/g, "-")}.md`,
+      content: `# ${name}\n\n## Role\n\n## Key Context\n\n## Interactions\n`,
+    }),
+  },
+];
 
 export default function MemoryBrowser() {
   const [files, setFiles] = useState<MemoryFile[]>([]);
@@ -46,6 +87,13 @@ export default function MemoryBrowser() {
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState<Filter>("all");
   const [reindexing, setReindexing] = useState(false);
+  const [templateOpen, setTemplateOpen] = useState(false);
+  const [templatePrompt, setTemplatePrompt] = useState<{ name: string; prompt: string; idx: number } | null>(null);
+  const [templateInput, setTemplateInput] = useState("");
+
+  // Tags
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [activeTag, setActiveTag] = useState<string | null>(null);
 
   // Sidebar resize
   const [sidebarWidth, setSidebarWidth] = useState(256);
@@ -54,8 +102,7 @@ export default function MemoryBrowser() {
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       if (!dragging.current) return;
-      const clamped = Math.min(Math.max(e.clientX, 200), 480);
-      setSidebarWidth(clamped);
+      setSidebarWidth(Math.min(Math.max(e.clientX - 56, 200), 480));
     };
     const onMouseUp = () => {
       if (dragging.current) {
@@ -91,7 +138,6 @@ export default function MemoryBrowser() {
     const res = await fetch("/api/memories");
     const data = await res.json();
     setFiles(data);
-    // Auto-select first file on initial load
     if (!selected && data.length > 0) {
       const first = data[0];
       setSelected(first.path);
@@ -109,14 +155,29 @@ export default function MemoryBrowser() {
     } catch {}
   }, []);
 
+  const loadTags = useCallback(async () => {
+    try {
+      const res = await fetch("/api/tags");
+      setTags(await res.json());
+    } catch {}
+  }, []);
+
   useEffect(() => {
     loadFiles();
     loadStatus();
-  }, [loadFiles, loadStatus]);
+    loadTags();
+  }, [loadFiles, loadStatus, loadTags]);
+
+  const tagFilteredFiles = activeTag
+    ? (() => {
+        const tagData = tags.find(t => t.tag === activeTag);
+        return tagData ? files.filter(f => tagData.files.includes(f.path)) : files;
+      })()
+    : files;
 
   const filteredFiles = filter === "daily"
-    ? files.filter((f) => f.isDaily).sort((a, b) => (b.date || "").localeCompare(a.date || ""))
-    : files;
+    ? tagFilteredFiles.filter((f) => f.isDaily).sort((a, b) => (b.date || "").localeCompare(a.date || ""))
+    : tagFilteredFiles;
 
   const loadFile = async (path: string) => {
     setSelected(path);
@@ -137,7 +198,6 @@ export default function MemoryBrowser() {
     setContent(editContent);
     setEditing(false);
     setSaving(false);
-    // Show reindexing state briefly
     setReindexing(true);
     setTimeout(() => {
       setReindexing(false);
@@ -157,8 +217,7 @@ export default function MemoryBrowser() {
     setSearchActive(true);
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(searchQuery)}`);
-      const data = await res.json();
-      setSearchResults(data);
+      setSearchResults(await res.json());
     } catch {
       setSearchResults([]);
     }
@@ -169,6 +228,30 @@ export default function MemoryBrowser() {
     setSearchQuery("");
     setSearchResults([]);
     setSearchActive(false);
+  };
+
+  const handleTemplate = (idx: number) => {
+    const tmpl = TEMPLATES[idx];
+    if (tmpl.prompt) {
+      setTemplatePrompt({ name: tmpl.name, prompt: tmpl.prompt, idx });
+      setTemplateInput("");
+    } else {
+      createFromTemplate(idx, "");
+    }
+  };
+
+  const createFromTemplate = async (idx: number, input: string) => {
+    const tmpl = TEMPLATES[idx];
+    const { path, content: tmplContent } = tmpl.generate(input);
+    await fetch(`/api/memories/${path}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: tmplContent }),
+    });
+    setTemplateOpen(false);
+    setTemplatePrompt(null);
+    await loadFiles();
+    loadFile(path);
   };
 
   return (
@@ -195,16 +278,37 @@ export default function MemoryBrowser() {
               className="pl-8 h-8 text-xs"
             />
             {searchActive && (
-              <button
-                type="button"
-                onClick={clearSearch}
-                className="absolute right-2 top-1/2 -translate-y-1/2"
-              >
+              <button type="button" onClick={clearSearch} className="absolute right-2 top-1/2 -translate-y-1/2">
                 <X className="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
               </button>
             )}
           </div>
         </form>
+
+        {/* Tags */}
+        {!searchActive && tags.length > 0 && (
+          <div className="px-3 py-2 flex flex-wrap gap-1">
+            {activeTag && (
+              <button onClick={() => setActiveTag(null)} className="text-[10px] text-muted-foreground hover:text-foreground">
+                ✕ clear
+              </button>
+            )}
+            {tags.slice(0, 12).map(t => (
+              <button
+                key={t.tag}
+                onClick={() => setActiveTag(activeTag === t.tag ? null : t.tag)}
+                className={cn(
+                  "px-1.5 py-0.5 rounded text-[10px] transition-colors",
+                  activeTag === t.tag
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-muted/50 text-muted-foreground hover:bg-muted"
+                )}
+              >
+                {t.tag} <span className="opacity-60">{t.count}</span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {/* Filter / Search Results header */}
         {searchActive ? (
@@ -217,9 +321,7 @@ export default function MemoryBrowser() {
               onClick={() => setFilter("all")}
               className={cn(
                 "px-2.5 py-1 rounded-md text-xs font-medium transition-colors",
-                filter === "all"
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-accent/50"
+                filter === "all" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/50"
               )}
             >
               All
@@ -228,14 +330,15 @@ export default function MemoryBrowser() {
               onClick={() => setFilter("daily")}
               className={cn(
                 "px-2.5 py-1 rounded-md text-xs font-medium transition-colors",
-                filter === "daily"
-                  ? "bg-accent text-accent-foreground"
-                  : "text-muted-foreground hover:bg-accent/50"
+                filter === "daily" ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent/50"
               )}
             >
               Daily
             </button>
             <div className="flex-1" />
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setTemplateOpen(true)} title="New Memory">
+              <Plus className="h-3.5 w-3.5" />
+            </Button>
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={loadFiles}>
               <RefreshCw className="h-3.5 w-3.5" />
             </Button>
@@ -270,9 +373,7 @@ export default function MemoryBrowser() {
                         </Badge>
                       )}
                     </div>
-                    <p className="text-[11px] text-muted-foreground line-clamp-2 pl-5.5">
-                      {r.chunk}
-                    </p>
+                    <p className="text-[11px] text-muted-foreground line-clamp-2 pl-5.5">{r.chunk}</p>
                   </button>
                 ))
               )}
@@ -291,15 +392,13 @@ export default function MemoryBrowser() {
                   <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   <span className="truncate min-w-0 flex-1">{f.name}</span>
                   {f.isDaily && (
-                    <Badge variant="secondary" className="shrink-0 text-[10px] px-1.5 py-0">
-                      daily
-                    </Badge>
+                    <Badge variant="secondary" className="shrink-0 text-[10px] px-1.5 py-0">daily</Badge>
                   )}
                 </button>
               ))}
               {filteredFiles.length === 0 && (
                 <p className="text-xs text-muted-foreground p-3">
-                  {filter === "daily" ? "No daily memory files found." : "No memory files found."}
+                  {activeTag ? `No files matching "${activeTag}".` : filter === "daily" ? "No daily memory files found." : "No memory files found."}
                 </p>
               )}
             </div>
@@ -365,9 +464,7 @@ export default function MemoryBrowser() {
                 />
               ) : (
                 <article className="prose prose-invert prose-sm max-w-none">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {content}
-                  </ReactMarkdown>
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
                 </article>
               )}
             </ScrollArea>
@@ -376,13 +473,60 @@ export default function MemoryBrowser() {
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
               <FileText className="h-12 w-12 text-muted-foreground/30 mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground">
-                Select a memory file to view
-              </p>
+              <p className="text-sm text-muted-foreground">Select a memory file to view</p>
             </div>
           </div>
         )}
       </div>
+
+      {/* Template Dialog */}
+      <Dialog open={templateOpen} onOpenChange={setTemplateOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>New Memory</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-2">
+            {TEMPLATES.map((tmpl, i) => (
+              <button
+                key={i}
+                onClick={() => handleTemplate(i)}
+                className="flex items-center gap-3 p-3 rounded-lg hover:bg-accent text-left transition-colors"
+              >
+                <span className="text-xl">{tmpl.icon}</span>
+                <span className="text-sm font-medium">{tmpl.name}</span>
+              </button>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Template Prompt Dialog */}
+      <Dialog open={!!templatePrompt} onOpenChange={() => setTemplatePrompt(null)}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{templatePrompt?.name}</DialogTitle>
+          </DialogHeader>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (templatePrompt && templateInput.trim()) {
+                createFromTemplate(templatePrompt.idx, templateInput.trim());
+              }
+            }}
+            className="space-y-4"
+          >
+            <Input
+              placeholder={templatePrompt?.prompt}
+              value={templateInput}
+              onChange={(e) => setTemplateInput(e.target.value)}
+              autoFocus
+            />
+            <Button type="submit" className="w-full" disabled={!templateInput.trim()}>
+              Create
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
