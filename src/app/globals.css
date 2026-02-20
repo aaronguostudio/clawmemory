@@ -125,3 +125,8 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Override Radix ScrollArea viewport inner div (display: table) that prevents text truncation */
+[data-slot="scroll-area-viewport"] > div {
+  display: block !important;
+}

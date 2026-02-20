@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readMemory, writeMemory } from "@/lib/memories";
+import { openclawIndex } from "@/lib/openclaw";
 
 export async function GET(
   _req: NextRequest,
@@ -24,6 +25,8 @@ export async function PUT(
   const { content } = await req.json();
   try {
     await writeMemory(filePath, content);
+    // Fire-and-forget reindex — don't block the save response
+    openclawIndex().catch(() => {});
     return NextResponse.json({ ok: true });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : "Write failed";

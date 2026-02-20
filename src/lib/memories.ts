@@ -74,32 +74,3 @@ export async function writeMemory(
   await fs.mkdir(path.dirname(full), { recursive: true });
   await fs.writeFile(full, content, "utf-8");
 }
-
-export async function searchMemories(
-  query: string
-): Promise<{ file: string; line: number; text: string; context: string }[]> {
-  const files = await listMemories();
-  const results: { file: string; line: number; text: string; context: string }[] = [];
-  const q = query.toLowerCase();
-
-  for (const f of files) {
-    try {
-      const content = await readMemory(f.path);
-      const lines = content.split("\n");
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].toLowerCase().includes(q)) {
-          const start = Math.max(0, i - 1);
-          const end = Math.min(lines.length, i + 2);
-          results.push({
-            file: f.path,
-            line: i + 1,
-            text: lines[i],
-            context: lines.slice(start, end).join("\n"),
-          });
-        }
-      }
-    } catch {}
-  }
-
-  return results;
-}
