@@ -20,7 +20,7 @@ ClawMemory is a memory management interface for OpenClaw — the AI agent framew
 ## Quick Start
 
 ```bash
-git clone https://github.com/aaronsb/clawmemory.git
+git clone https://github.com/aaronguostudio/clawmemory.git
 cd clawmemory
 cp .env.example .env.local
 # Edit .env.local to point to your OpenClaw workspace
