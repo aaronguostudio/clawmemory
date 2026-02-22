@@ -25,16 +25,20 @@ interface GraphLink {
 }
 
 const TYPE_COLORS: Record<string, string> = {
-  person: "#3b82f6",
-  project: "#22c55e",
-  tool: "#a855f7",
-  other: "#6b7280",
+  person: "#7c9dd9",
+  project: "#6bbf8a",
+  tool: "#b49eda",
+  other: "#8a8f99",
 };
 
 export default function GraphPage() {
   const [graphData, setGraphData] = useState<{ nodes: GraphNode[]; links: GraphLink[] } | null>(null);
   const [selected, setSelected] = useState<GraphNode | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const graphRef = useRef<any>(null);
+  const NAV_W = 57; // w-14 (56px) + 1px border
+  const SIDEBAR_W = 320; // detail sidebar w-80
+  const graphWidth = () => window.innerWidth - NAV_W - (selected ? SIDEBAR_W : 0);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
 
   useEffect(() => {
@@ -42,18 +46,12 @@ export default function GraphPage() {
   }, []);
 
   useEffect(() => {
-    const updateDimensions = () => {
-      if (containerRef.current) {
-        setDimensions({
-          width: containerRef.current.clientWidth,
-          height: containerRef.current.clientHeight,
-        });
-      }
-    };
-    updateDimensions();
-    window.addEventListener("resize", updateDimensions);
-    return () => window.removeEventListener("resize", updateDimensions);
-  }, []);
+    const update = () => setDimensions({ width: graphWidth(), height: window.innerHeight });
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
 
   const handleNodeClick = useCallback((node: object) => {
     setSelected(node as GraphNode);
@@ -91,38 +89,42 @@ export default function GraphPage() {
 
   return (
     <div className="flex h-full">
-      <div ref={containerRef} className="flex-1 bg-background relative">
-        {graphData.nodes.length === 0 ? (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-muted-foreground text-sm">No entities found in memory files.</p>
-          </div>
-        ) : (
-          <ForceGraph2D
-            graphData={graphData}
-            width={dimensions.width - (selected ? 320 : 0)}
-            height={dimensions.height}
-            nodeCanvasObject={nodeCanvasObject}
-            onNodeClick={handleNodeClick}
-            linkColor={() => "rgba(255,255,255,0.1)"}
-            backgroundColor="transparent"
-            nodePointerAreaPaint={(node: object, color: string, ctx: CanvasRenderingContext2D) => {
-              const n = node as GraphNode;
-              const size = Math.max(4, Math.min(n.val * 2, 20));
-              ctx.beginPath();
-              ctx.arc(n.x || 0, n.y || 0, size + 4, 0, 2 * Math.PI);
-              ctx.fillStyle = color;
-              ctx.fill();
-            }}
-          />
-        )}
-        {/* Legend */}
-        <div className="absolute bottom-4 left-4 flex gap-3 text-[11px] text-muted-foreground">
-          {Object.entries(TYPE_COLORS).map(([type, color]) => (
-            <div key={type} className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
-              {type}
+      <div className="flex-1 relative">
+        <div className="absolute inset-0 bg-background overflow-hidden">
+          {graphData.nodes.length === 0 ? (
+            <div className="flex items-center justify-center h-full">
+              <p className="text-muted-foreground text-sm">No entities found in memory files.</p>
             </div>
-          ))}
+          ) : (
+            <ForceGraph2D
+              ref={graphRef}
+              graphData={graphData}
+              width={dimensions.width}
+              height={dimensions.height}
+              nodeCanvasObject={nodeCanvasObject}
+              onNodeClick={handleNodeClick}
+              onEngineStop={() => graphRef.current?.zoomToFit(400, 60)}
+              linkColor={() => "rgba(255,255,255,0.07)"}
+              backgroundColor="transparent"
+              nodePointerAreaPaint={(node: object, color: string, ctx: CanvasRenderingContext2D) => {
+                const n = node as GraphNode;
+                const size = Math.max(4, Math.min(n.val * 2, 20));
+                ctx.beginPath();
+                ctx.arc(n.x || 0, n.y || 0, size + 4, 0, 2 * Math.PI);
+                ctx.fillStyle = color;
+                ctx.fill();
+              }}
+            />
+          )}
+          {/* Legend */}
+          <div className="absolute bottom-4 left-4 flex gap-3 text-[11px] text-muted-foreground">
+            {Object.entries(TYPE_COLORS).map(([type, color]) => (
+              <div key={type} className="flex items-center gap-1.5">
+                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: color }} />
+                {type}
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
